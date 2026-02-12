@@ -1,156 +1,158 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { GameBoard } from "@/components/game-board";
 import type { Puzzle, SubmitResult } from "@/types";
 
-// ─── Temporary Hardcoded Puzzles ──────────────────────────────────────────────
-// These puzzles are used for local development and testing before the server
-// API is available. Each puzzle contains 5 events listed in their correct
-// chronological order. The GameBoard will shuffle them on mount.
-
-const TEMP_PUZZLES: Puzzle[] = [
-  {
-    id: "temp-1",
-    title: "January, 2026",
-    category: "Leviathan News",
-    events: [
-      {
-        id: "e1",
-        text: "Vitalik brings back the milady profile pic on X/Twitter",
-        date: "1/1/2026",
-        url: null,
-      },
-      {
-        id: "e2",
-        text: "Japan's 30Y Government Bond Yield Breaks Past 2.5% for First Time Since 2009",
-        date: "1/7/2026",
-        url: null,
-      },
-      {
-        id: "e3",
-        text: "Yearn's yYB crosses 1 million YB locked",
-        date: "1/12/2026",
-        url: null,
-      },
-      {
-        id: "e4",
-        text: "Caroline Ellison begins 2-year prison sentence at FCI Dublin in California",
-        date: "1/21/2026",
-        url: null,
-      },
-      {
-        id: "e5",
-        text: "Introducing Polaris: The North Star of DeFi - Yearn's new launch",
-        date: "1/27/2026",
-        url: null,
-      },
-    ],
-  },
-  {
-    id: "temp-2",
-    title: "Demo Puzzle",
-    category: "Historical Events",
-    events: [
-      {
-        id: "h1",
-        text: "Apollo 11 lands on the Moon.",
-        date: "1969",
-        url: "https://en.wikipedia.org/wiki/Apollo_11",
-      },
-      {
-        id: "h2",
-        text: "The Berlin Wall falls.",
-        date: "1989",
-        url: "https://en.wikipedia.org/wiki/Fall_of_the_Berlin_Wall",
-      },
-      {
-        id: "h3",
-        text: "First iPod is released.",
-        date: "2001",
-        url: "https://en.wikipedia.org/wiki/IPod",
-      },
-      {
-        id: "h4",
-        text: "First iPhone is released.",
-        date: "2007",
-        url: "https://en.wikipedia.org/wiki/IPhone",
-      },
-      {
-        id: "h5",
-        text: "SpaceX launches first crewed mission.",
-        date: "2020",
-        url: "https://en.wikipedia.org/wiki/SpaceX_Demo-2",
-      },
-    ],
-  },
-];
-
-// ─── Correct Order Map ────────────────────────────────────────────────────────
-// Maps each puzzle ID to its correct chronological event ordering.
-// Used by the local handleSubmit to validate the player's answer without
-// requiring a server round-trip. Will be replaced by server validation in
-// Phase 5 when the puzzle API routes are implemented.
-
-const CORRECT_ORDERS: Record<string, string[]> = {
-  "temp-1": ["e1", "e2", "e3", "e4", "e5"],
-  "temp-2": ["h1", "h2", "h3", "h4", "h5"],
-};
-
 // ─── Home Page ────────────────────────────────────────────────────────────────
-// Renders the GameBoard with a temporary local validation flow.
-// The `puzzleIndex` state tracks which puzzle is currently active, and the
-// `key` prop on GameBoard forces a full remount when the puzzle changes,
-// ensuring all internal state (shuffle, timer, hints) resets cleanly.
+// Fetches the daily puzzle from the server API on mount and delegates answer
+// validation to the server via POST /api/game/submit. Handles loading and
+// error states while the puzzle data is being fetched. The GameBoard component
+// receives a server-backed onSubmit callback that returns XP and achievements.
 
 export default function Home() {
-  // Index into TEMP_PUZZLES to track the currently displayed puzzle
-  const [puzzleIndex, setPuzzleIndex] = useState(0);
-  const puzzle = TEMP_PUZZLES[puzzleIndex];
+  // The currently loaded puzzle, or null while loading / on error
+  const [puzzle, setPuzzle] = useState<Puzzle | null>(null);
 
-  // ─── Local Validation ───────────────────────────────────────────────────
-  // Compares the player's submitted ordering against the known correct order.
-  // Computes a score (count of correctly placed events), determines win/loss,
-  // and returns a SubmitResult matching the server API contract. This lets
-  // the GameBoard render results identically whether validated locally or
-  // via the server.
+  // Loading state tracks whether the initial puzzle fetch is in progress
+  const [loading, setLoading] = useState(true);
+
+  // Error message displayed when the puzzle fetch or submission fails
+  const [error, setError] = useState<string | null>(null);
+
+  // Counter incremented to trigger a fresh puzzle fetch (forces GameBoard
+  // remount via the key prop)
+  const [puzzleKey, setPuzzleKey] = useState(0);
+
+  // ─── Fetch Puzzle on Mount ──────────────────────────────────────────────
+  // Requests today's puzzle from the API. Falls back to a random puzzle if
+  // no daily puzzle is configured for today (handled server-side).
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchPuzzle() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const res = await fetch("/api/puzzles/today");
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(
+            data?.error || `Failed to load puzzle (${res.status})`
+          );
+        }
+
+        const data: Puzzle = await res.json();
+
+        // Guard against state updates after unmount or stale fetches
+        if (!cancelled) {
+          setPuzzle(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Failed to load puzzle"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    fetchPuzzle();
+
+    // Cleanup function prevents state updates if the component unmounts
+    // before the fetch completes (e.g., during fast navigation)
+    return () => {
+      cancelled = true;
+    };
+  }, [puzzleKey]);
+
+  // ─── Server-Backed Submit Handler ───────────────────────────────────────
+  // Sends the player's ordering to POST /api/game/submit for server-side
+  // validation. The server computes the score, checks for wins, persists
+  // game results (if authenticated), calculates XP, and returns newly
+  // unlocked achievements.
   const handleSubmit = useCallback(
     async (
       orderedIds: string[],
       hintsUsed: number,
       solveTimeMs: number
     ): Promise<SubmitResult> => {
-      const correctOrder = CORRECT_ORDERS[puzzle.id];
+      if (!puzzle) {
+        throw new Error("No puzzle loaded");
+      }
 
-      // Count how many events are in their correct position
-      const score = orderedIds.reduce(
-        (acc, id, i) => (id === correctOrder[i] ? acc + 1 : acc),
-        0
-      );
+      const res = await fetch("/api/game/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          puzzleId: puzzle.id,
+          orderedEventIds: orderedIds,
+          hintsUsed,
+          solveTimeMs,
+        }),
+      });
 
-      // Win requires all events in the correct order
-      const won = score === correctOrder.length;
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(
+          data?.error || `Submission failed (${res.status})`
+        );
+      }
 
-      return {
-        won,
-        score,
-        correctOrder,
-        // XP placeholder: 100 base for a win, 0 for a loss
-        xpEarned: won ? 100 : 0,
-        // No achievements in local validation mode
-        newAchievements: [],
-      };
+      return res.json();
     },
-    [puzzle.id]
+    [puzzle]
   );
 
   // ─── Next Puzzle Navigation ─────────────────────────────────────────────
-  // Cycles through the TEMP_PUZZLES array, wrapping back to the first puzzle
-  // after the last one. The puzzleIndex change triggers a GameBoard remount
-  // via the key prop.
+  // Increments the puzzleKey counter which triggers a new fetch via the
+  // useEffect dependency. This loads a fresh puzzle from the server and
+  // forces a full GameBoard remount via the key prop.
   const handleNextPuzzle = useCallback(() => {
-    setPuzzleIndex((prev) => (prev + 1) % TEMP_PUZZLES.length);
+    setPuzzleKey((prev) => prev + 1);
   }, []);
+
+  // ─── Loading State ──────────────────────────────────────────────────────
+  // Displayed while the puzzle data is being fetched from the server.
+  // Uses a pulsing animation to indicate activity.
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-2xl px-4">
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-navy/20 border-t-navy" />
+          <p className="mt-4 text-sm text-gray-500">Loading puzzle...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Error State ────────────────────────────────────────────────────────
+  // Displayed when the puzzle fetch fails. Shows the error message and a
+  // retry button that re-triggers the fetch.
+  if (error || !puzzle) {
+    return (
+      <div className="mx-auto max-w-2xl px-4">
+        <div className="flex flex-col items-center justify-center py-20">
+          <p className="text-sm text-red-600">
+            {error || "No puzzle available"}
+          </p>
+          <button
+            type="button"
+            onClick={() => setPuzzleKey((prev) => prev + 1)}
+            className="mt-4 rounded-lg bg-navy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-navy/90"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-4">
@@ -159,11 +161,11 @@ export default function Home() {
         {puzzle.title}
       </h1>
 
-      {/* GameBoard is keyed by puzzle id + index so that changing puzzles
-          forces a full remount, resetting all internal state (shuffle order,
-          timer, hints, result, etc.) */}
+      {/* GameBoard is keyed by puzzle id + puzzleKey so that loading a new
+          puzzle forces a full remount, resetting all internal state (shuffle
+          order, timer, hints, result, etc.) */}
       <GameBoard
-        key={puzzle.id + puzzleIndex}
+        key={puzzle.id + puzzleKey}
         puzzle={puzzle}
         onSubmit={handleSubmit}
         onNextPuzzle={handleNextPuzzle}
