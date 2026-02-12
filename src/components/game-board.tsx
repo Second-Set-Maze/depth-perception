@@ -19,6 +19,8 @@ import {
 
 import { GameCard } from "@/components/game-card";
 import { GameTimer } from "@/components/game-timer";
+import { AchievementToast } from "@/components/achievement-toast";
+import { ResultModal } from "@/components/result-modal";
 import { MAX_HINTS } from "@/lib/constants";
 import type { Puzzle, PuzzleEvent, SubmitResult, Achievement } from "@/types";
 
@@ -192,10 +194,12 @@ export function GameBoard({ puzzle, onSubmit, onNextPuzzle }: GameBoardProps) {
   // status by comparing each card's position against this reference)
   const [correctOrder, setCorrectOrder] = useState<string[]>([]);
 
-  // Whether the result modal should be displayed (placeholder for Phase 7)
+  // Whether the result modal should be displayed after submission
   const [showModal, setShowModal] = useState(false);
 
-  // Queue of achievements to display as toasts (placeholder for Phase 7)
+  // Queue of achievements to display as sequential slide-in toasts.
+  // The first item in the queue is rendered; on dismiss it is removed
+  // and the next achievement (if any) takes its place.
   const [achievementQueue, setAchievementQueue] = useState<Achievement[]>([]);
 
   // ─── Shuffle on mount / puzzle change ───────────────────────────────────
@@ -343,7 +347,7 @@ export function GameBoard({ puzzle, onSubmit, onNextPuzzle }: GameBoardProps) {
         setGameWon(true);
       }
 
-      // Queue achievements for toast display (Phase 7 will render these)
+      // Queue achievements for sequential toast display via AchievementToast
       if (submitResult.newAchievements.length > 0) {
         setAchievementQueue(submitResult.newAchievements);
       }
@@ -539,6 +543,33 @@ export function GameBoard({ puzzle, onSubmit, onNextPuzzle }: GameBoardProps) {
             Drag the grip icon to reorder, or click two cards to swap them.
           </span>
         </p>
+      )}
+
+      {/* ── Result Modal ───────────────────────────────────────────────── */}
+      {/* Shown as a full-screen overlay after submission. Win state shows
+          XP earned, achievements, and a review button. Loss state shows
+          score and a retry button. */}
+      {showModal && result && (
+        <ResultModal
+          result={result}
+          totalEvents={puzzle.events.length}
+          onRetry={handleRetry}
+          onReview={() => setShowModal(false)}
+        />
+      )}
+
+      {/* ── Achievement Toasts ─────────────────────────────────────────── */}
+      {/* Renders the first achievement in the queue as a slide-in toast.
+          When dismissed (manually or via auto-timer), the first item is
+          removed from the queue, causing the next achievement to render. */}
+      {achievementQueue.length > 0 && (
+        <AchievementToast
+          key={achievementQueue[0].id}
+          achievement={achievementQueue[0]}
+          onDismiss={() =>
+            setAchievementQueue((prev) => prev.slice(1))
+          }
+        />
       )}
     </div>
   );
