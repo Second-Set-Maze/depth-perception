@@ -80,6 +80,7 @@ export async function GET() {
       id: puzzle.id,
       title: puzzle.title,
       category: puzzle.category,
+      isDaily: puzzle.isDaily,
       events: shuffledEvents,
     });
   } catch (error) {

@@ -24,6 +24,10 @@ export default function Home() {
   // remount via the key prop)
   const [puzzleKey, setPuzzleKey] = useState(0);
 
+  // Tracks whether the current puzzle is today's daily challenge, used to
+  // render a "Daily Challenge" badge in the GameBoard header
+  const [isDaily, setIsDaily] = useState(false);
+
   // ─── Fetch Puzzle on Mount ──────────────────────────────────────────────
   // Requests today's puzzle from the API. Falls back to a random puzzle if
   // no daily puzzle is configured for today (handled server-side).
@@ -44,11 +48,14 @@ export default function Home() {
           );
         }
 
-        const data: Puzzle = await res.json();
+        // The API response includes `isDaily` which is not part of the
+        // Puzzle type but is needed to show the Daily Challenge badge.
+        const data = (await res.json()) as Puzzle & { isDaily?: boolean };
 
         // Guard against state updates after unmount or stale fetches
         if (!cancelled) {
           setPuzzle(data);
+          setIsDaily(Boolean(data.isDaily));
         }
       } catch (err) {
         if (!cancelled) {
@@ -169,6 +176,7 @@ export default function Home() {
         puzzle={puzzle}
         onSubmit={handleSubmit}
         onNextPuzzle={handleNextPuzzle}
+        isDaily={isDaily}
       />
     </div>
   );

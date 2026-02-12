@@ -126,6 +126,36 @@ export async function POST(request: Request) {
 
       const user = userResult[0];
 
+      // ── Daily duplicate check ───────────────────────────────────────────
+      // If this puzzle is a daily challenge and the authenticated user has
+      // already submitted a result for it, reject the submission with a 409
+      // to prevent repeated XP farming on the same daily.
+      const puzzleCheck = await db
+        .select({ isDaily: puzzles.isDaily })
+        .from(puzzles)
+        .where(eq(puzzles.id, puzzleId))
+        .limit(1);
+
+      if (puzzleCheck.length > 0 && puzzleCheck[0].isDaily) {
+        const existingResult = await db
+          .select({ id: gameResults.id })
+          .from(gameResults)
+          .where(
+            and(
+              eq(gameResults.userId, user.id),
+              eq(gameResults.puzzleId, puzzleId)
+            )
+          )
+          .limit(1);
+
+        if (existingResult.length > 0) {
+          return NextResponse.json(
+            { error: "You have already completed today's daily challenge" },
+            { status: 409 }
+          );
+        }
+      }
+
       // ── Record the game result ─────────────────────────────────────────
       await db.insert(gameResults).values({
         userId: user.id,

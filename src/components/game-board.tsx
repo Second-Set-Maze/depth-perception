@@ -158,9 +158,12 @@ interface GameBoardProps {
     solveTimeMs: number
   ) => Promise<SubmitResult>;
   onNextPuzzle: () => void;
+  // When true, displays a "Daily Challenge" badge in the header area to
+  // distinguish daily puzzles from random/archive puzzles.
+  isDaily?: boolean;
 }
 
-export function GameBoard({ puzzle, onSubmit, onNextPuzzle }: GameBoardProps) {
+export function GameBoard({ puzzle, onSubmit, onNextPuzzle, isDaily }: GameBoardProps) {
   // ─── State ──────────────────────────────────────────────────────────────
   // `items` — the player's current ordering of events (shuffled on mount)
   const [items, setItems] = useState<PuzzleEvent[]>([]);
@@ -399,12 +402,18 @@ export function GameBoard({ puzzle, onSubmit, onNextPuzzle }: GameBoardProps) {
 
   return (
     <div className="mx-auto w-full max-w-lg space-y-4">
-      {/* ── Header: category label + timer ─────────────────────────────── */}
+      {/* ── Header: category label + daily badge + timer ────────────────── */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-2">
           <span className="rounded-full bg-navy/10 px-3 py-1 text-xs font-semibold tracking-wide text-navy uppercase">
             {puzzle.category}
           </span>
+          {/* Daily Challenge badge — rendered only when the puzzle is today's daily */}
+          {isDaily && (
+            <span className="rounded-full bg-navy px-3 py-1 text-xs font-semibold tracking-wide text-white">
+              Daily Challenge
+            </span>
+          )}
         </div>
         <GameTimer running={timerRunning} onTimeUpdate={setSolveTimeMs} />
       </div>
